@@ -1,0 +1,6 @@
+# Environnement virtuel Python (ne doit jamais être poussé sur GitHub)
+venv/
+
+# Fichiers Python compilés
+__pycache__/
+*.pyc
