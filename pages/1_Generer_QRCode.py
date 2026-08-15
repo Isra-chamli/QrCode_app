@@ -1,10 +1,12 @@
 import streamlit as st
 import pandas as pd
-import qrcode
-from PIL import Image, ImageDraw, ImageFont
 import io
+from auth import exige_connexion
+from config import SEUIL_STOCK_FAIBLE
+from labels import generer_etiquette, nom_fichier_etiquette
 
 st.set_page_config(page_title="Générer QR Code", page_icon="🏷️", layout="centered")
+exige_connexion()
 
 DATA_PATH = "data/stock_maklada.csv"
 
@@ -38,68 +40,25 @@ def format_choix(i):
     lot = ligne["Numéro du lot"]
     emplacement = ligne["Emplacement"]
     entrepot = ligne["Entrepôt"]
-    return f"{article} | Lot {lot} | Emp. {emplacement} | {entrepot}"
+    badge = " 🔴" if ligne["Stock physique"] < SEUIL_STOCK_FAIBLE else ""
+    return f"{article} | Lot {lot} | Emp. {emplacement} | {entrepot}{badge}"
 
-choix = st.selectbox(
-    "Choisir la ligne de stock",
-    resultats["id"],
-    format_func=format_choix
-)
+choix = st.selectbox("Choisir la ligne de stock", resultats["id"], format_func=format_choix)
 
 produit = df[df["id"] == choix].iloc[0]
 
-def val(x, default="-"):
-    return default if pd.isna(x) else x
+if produit["Stock physique"] < SEUIL_STOCK_FAIBLE:
+    st.warning(f"⚠️ Stock faible : {produit['Stock physique']:,.0f} unités (seuil {SEUIL_STOCK_FAIBLE})")
 
-qr_content = f"MAKLADA-ID:{produit['id']}"
-
-qr = qrcode.QRCode(box_size=8, border=2)
-qr.add_data(qr_content)
-qr.make(fit=True)
-qr_img = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-
-label_w, label_h = 520, 260
-label = Image.new("RGB", (label_w, label_h), "white")
-qr_resized = qr_img.resize((220, 220))
-label.paste(qr_resized, (10, 20))
-
-draw = ImageDraw.Draw(label)
-try:
-    font_bold = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", 17)
-    font = ImageFont.truetype("/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", 13)
-except Exception:
-    font_bold = ImageFont.load_default()
-    font = ImageFont.load_default()
-
-x_text = 250
-article_num = produit["Numéro d'article"]
-designation = str(val(produit["Nom du produit"]))[:32]
-lot = val(produit["Numéro du lot"])
-emplacement = val(produit["Emplacement"])
-entrepot = val(produit["Entrepôt"])
-site = val(produit["Site"])
-stock = val(produit["Stock physique"])
-stock_str = f"{stock:,.0f}".replace(",", " ") if not isinstance(stock, str) else stock
-ligne_id = produit["id"]
-
-draw.text((x_text, 20), str(article_num), font=font_bold, fill="black")
-draw.text((x_text, 48), designation, font=font, fill="black")
-draw.text((x_text, 75), f"Lot: {lot}", font=font, fill="black")
-draw.text((x_text, 98), f"Emplacement: {emplacement}", font=font, fill="black")
-draw.text((x_text, 121), f"Entrepôt: {entrepot}", font=font, fill="black")
-draw.text((x_text, 144), f"Site: {site}", font=font, fill="black")
-draw.text((x_text, 167), f"Stock physique: {stock_str}", font=font, fill="black")
-draw.text((x_text, 190), f"ID ligne: {ligne_id}", font=font, fill="black")
-
+label = generer_etiquette(produit)
 st.image(label, caption="Aperçu de l'étiquette", use_container_width=False)
 
 buf = io.BytesIO()
 label.save(buf, format="PNG")
-nom_fichier = f"etiquette_{article_num}_{val(lot, 'lot')}.png"
 st.download_button(
     "⬇️ Télécharger l'étiquette (PNG)",
     data=buf.getvalue(),
-    file_name=nom_fichier,
+    file_name=nom_fichier_etiquette(produit),
     mime="image/png"
 )
 

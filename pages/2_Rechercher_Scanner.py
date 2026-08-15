@@ -3,8 +3,11 @@ import pandas as pd
 import numpy as np
 import cv2
 from PIL import Image
+from auth import exige_connexion
+from config import SEUIL_STOCK_FAIBLE
 
 st.set_page_config(page_title="Scanner / Rechercher", page_icon="🔎", layout="centered")
+exige_connexion()
 
 DATA_PATH = "data/stock_maklada.csv"
 
@@ -14,6 +17,9 @@ def load_data():
 
 df = load_data()
 
+if "recherches_recentes" not in st.session_state:
+    st.session_state["recherches_recentes"] = []
+
 st.title("🔎 Scanner / Rechercher une ligne de stock")
 
 tab1, tab2 = st.tabs(["📷 Scanner une étiquette", "🔤 Recherche manuelle"])
@@ -22,8 +28,6 @@ def val(x, default="-"):
     return default if pd.isna(x) else x
 
 def afficher_fiche(produit):
-    st.success("Ligne de stock trouvée ✅")
-
     article = produit["Numéro d'article"]
     designation = val(produit["Nom du produit"])
     lot = val(produit["Numéro du lot"])
@@ -33,6 +37,10 @@ def afficher_fiche(produit):
     stock = val(produit["Stock physique"])
     stock_str = f"{stock:,.0f}".replace(",", " ") if not isinstance(stock, str) else stock
     ligne_id = produit["id"]
+
+    if isinstance(stock, (int, float)) and stock < SEUIL_STOCK_FAIBLE:
+        st.warning(f"⚠️ Stock faible : {stock_str} unités (seuil {SEUIL_STOCK_FAIBLE})")
+    st.success("Ligne de stock trouvée ✅")
 
     c1, c2 = st.columns(2)
     with c1:
@@ -45,6 +53,13 @@ def afficher_fiche(produit):
         st.markdown(f"**Site :** {site}")
         st.markdown(f"**Stock physique :** {stock_str}")
         st.markdown(f"**ID ligne :** {ligne_id}")
+
+def ajouter_recherche_recente(terme):
+    recentes = st.session_state["recherches_recentes"]
+    if terme in recentes:
+        recentes.remove(terme)
+    recentes.insert(0, terme)
+    st.session_state["recherches_recentes"] = recentes[:8]
 
 with tab1:
     st.write("Prends en photo ou uploade l'étiquette contenant le QR Code.")
@@ -67,6 +82,7 @@ with tab1:
                 match = df[df["id"] == ligne_id]
                 if not match.empty:
                     afficher_fiche(match.iloc[0])
+                    ajouter_recherche_recente(str(match.iloc[0]["Numéro d'article"]))
                 else:
                     st.error("QR Code reconnu mais ligne introuvable dans la base.")
             else:
@@ -75,7 +91,17 @@ with tab1:
             st.error("Aucun QR Code détecté dans l'image. Réessaie avec une photo plus nette.")
 
 with tab2:
-    recherche = st.text_input("Article, désignation ou lot")
+    if st.session_state["recherches_recentes"]:
+        st.caption("Recherches récentes :")
+        cols = st.columns(len(st.session_state["recherches_recentes"]))
+        for c, terme in zip(cols, st.session_state["recherches_recentes"]):
+            if c.button(terme, key=f"recent_{terme}"):
+                st.session_state["recherche_input"] = terme
+
+    recherche = st.text_input(
+        "Article, désignation ou lot",
+        key="recherche_input"
+    )
     if recherche:
         resultats = df[
             df["Numéro d'article"].str.contains(recherche, case=False, na=False)
@@ -83,6 +109,7 @@ with tab2:
             | df["Numéro du lot"].astype(str).str.contains(recherche, case=False, na=False)
         ]
         if not resultats.empty:
+            ajouter_recherche_recente(recherche)
             st.caption(f"{len(resultats)} résultat(s) — 20 premiers affichés")
             for _, produit in resultats.head(20).iterrows():
                 with st.container(border=True):
